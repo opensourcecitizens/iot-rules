@@ -1,0 +1,16 @@
+package drools.test
+ 
+import drools.runner.Person
+ 
+dialect "mvel"
+ 
+/*
+ * This rule checks that a person is >= 21
+ */
+rule "Person is 21"
+    when
+        $person : Person(age>=21)               
+    then
+    	$person.setAllowed(true)
+        System.out.println($person.name+" is allowed = "+$person.allowed);
+end
