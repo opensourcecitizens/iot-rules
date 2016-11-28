@@ -52,9 +52,9 @@ rule "Incoming Registry Post"
     	System.out.println("****** Incoming Registry Post ******");
         worker = new RulesForwardWorker();
         attrMap = new HashMap<String,Object>();
-		attrMap.put("path", "/api/v1/login");
+		attrMap.put("path", "/api/v1/login/internal");
 		attrMap.put("header", "{\"Content-Type\": \"application/json\"}");	
-		$messageMap.put("payload", "{\"email\":\"batsalenkab+is@gmail.com\", \"password\":\"password\"}");
+		$messageMap.put("payload", "{\"clientId\":\"c7GjNFZGzRO8TdhCbVINDytKOOGs3QhV\", \"clientSecret\":\"tJugSnP8ny_TYk3rrA8x6jln7PJ682e8gWuyEHxdzp09avV_tKO1a9WJuuRmGHA3\"}");
         String tokenjson = worker.localCachedRestPost("http://54.149.9.196", $messageMap,  attrMap);
         token = worker.searchJson("jwt",tokenjson).toString();
              
@@ -80,6 +80,46 @@ rule "Incoming Registry Post"
 		insertLogical( new DashBoardData( $messageMap,"registry" ) );
 end
 
+
+rule "Device Discovery Message Registry Post"
+    when
+        $messageMap : Map( this["messagetype"] == "DEVICE_ONBOARDING" )
+    then
+    	System.out.println("****** Device Discovery Message Registry Post ******");
+        worker = new RulesForwardWorker();
+        attrMap = new HashMap<String,Object>();
+		attrMap.put("path", "/api/v1/login/internal");
+		attrMap.put("header", "{\"Content-Type\": \"application/json\"}");	
+		$messageMap.put("payload", "{\"clientId\":\"c7GjNFZGzRO8TdhCbVINDytKOOGs3QhV\", \"clientSecret\":\"tJugSnP8ny_TYk3rrA8x6jln7PJ682e8gWuyEHxdzp09avV_tKO1a9WJuuRmGHA3\"}");
+        String tokenjson = worker.localCachedRestPost("http://54.149.9.196", $messageMap,  attrMap);
+        token = worker.searchJson("jwt",tokenjson).toString();
+             
+        rest_Uri =  new String("http://54.149.9.196");
+        
+        Map regPayloadMap = (Map)worker.searchMapFirstSubKey("RemoteRequest",$messageMap);
+        
+        //improve this by extracting hubid in initial stream process and appending to deviceid attr
+        String hubIdPath = (String)worker.searchMap("path",regPayloadMap);
+        String hubId = hubIdPath.split("device")[1].split("/")[1];
+        String payload = (String)worker.searchMap("payload",regPayloadMap);
+        String path = "/api/v1/devices/onboard?hub_id="+hubId;
+        
+        
+        attrMap = new HashMap<String,Object>();
+		attrMap.put("path", path);
+		attrMap.put("header", "{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer "+token+"\"}");	
+		
+        $messageMap.put("payload", payload);
+        result = worker.remoteRestPost(rest_Uri, $messageMap,  attrMap);
+
+        $messageMap.put("endpoint_uri", rest_Uri);
+        $messageMap.put("endpoint_attr", attrMap);
+        $messageMap.put("result", result);
+		 
+		System.out.println("result = "+result); 
+		insertLogical( new DashBoardData( $messageMap,"registry" ) );
+end
+
 rule "Incoming Registry Put"
     when
         $messageMap : Map( this["messagetype"] == "REGISTRY_PUT" )
@@ -88,9 +128,9 @@ rule "Incoming Registry Put"
         worker = new RulesForwardWorker();
         
         attrMap = new HashMap<String,Object>();
-		attrMap.put("path", "/api/v1/login");
+		attrMap.put("path", "/api/v1/login/internal");
 		attrMap.put("header", "{\"Content-Type\": \"application/json\"}");	
-		$messageMap.put("payload", "{\"email\":\"batsalenkab+is@gmail.com\", \"password\":\"password\"}");
+		$messageMap.put("payload", "{\"clientId\":\"c7GjNFZGzRO8TdhCbVINDytKOOGs3QhV\", \"clientSecret\":\"tJugSnP8ny_TYk3rrA8x6jln7PJ682e8gWuyEHxdzp09avV_tKO1a9WJuuRmGHA3\"}");
         String tokenjson = worker.localCachedRestPost("http://54.149.9.196", $messageMap,  attrMap);
         token = worker.searchJson("jwt",tokenjson).toString();
         
