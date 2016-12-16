@@ -2,9 +2,12 @@ package drools
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Arrays;
 import java.lang.String;
+import java.net.URL;
 import com.neustar.iot.spark.rules.RulesForwardWorker;
 import javax.xml.bind.DatatypeConverter;
+import org.apache.commons.net.util.Base64;
 
 global RulesForwardWorker worker
 global Map<String,Object> attrMap
@@ -28,17 +31,19 @@ declare RegistryResult
     endpoint: String
 end
 
+declare ErrorMessage
+    message : Map
+    exception: String
+    stackTrace: String
+end
+
 declare MQTTResult
     message : Map
     result: String
     endpoint: String
 end
 
-declare MQTTMessage
-    message : Map
-    result: String
-    endpoint: String
-end
+
 
 declare DashBoardData
     message : Map
@@ -77,7 +82,7 @@ rule "Incoming Registry Post"
         $messageMap.put("endpoint_attr", attrMap);
         $messageMap.put("result", result);
 		 
-		insertLogical( new DashBoardData( $messageMap,"registry" ) );
+		insertLogical( new DashBoardData( $messageMap,"hub" ) );
 end
 
 
@@ -101,9 +106,8 @@ rule "Device Discovery Message Registry Post"
         //improve this by extracting hubid in initial stream process and appending to deviceid attr
         String hubIdPath = (String)worker.searchMap("path",regPayloadMap);
         String hubId = hubIdPath.split("device")[1].split("/")[1];
-        String payload = (String)worker.searchMap("payload",regPayloadMap);
-        String path = "/api/v1/devices/onboard?hub_id="+hubId;
-        
+        Object payload = worker.searchMap("payload",regPayloadMap);
+        String path = "/api/v1/devices/onboard?hub_id="+hubId;        
         
         attrMap = new HashMap<String,Object>();
 		attrMap.put("path", path);
@@ -157,15 +161,65 @@ rule "Incoming Registry Put"
         $messageMap.put("endpoint_attr", attrMap);
         $messageMap.put("result", result);
         
-       	insertLogical( new DashBoardData( $messageMap,"registry") );
+       	insertLogical( new DashBoardData( $messageMap,"hub") );
 end
 
 rule "Incoming Registry Response"
     when
-        $messageMap : Map( this["registrypayload"] != null && this["messagetype"] == "REGISTRY_RESPONSE" )
+        $messageMap : Map( this["payload"] != null && this["messagetype"] == "REGISTRY_RESPONSE" )
     then
-    	System.out.println("****** Incoming Registry Response ******");		 
-		insertLogical( new MQTTMessage( $messageMap,null,null ) );
+    	System.out.println("****** Incoming Registry Response ******");	
+    	
+    	String mqttBrokerUri = new String("tcp://ec2-52-42-35-89.us-west-2.compute.amazonaws.com:1883");
+    	
+    	try{
+		worker = new RulesForwardWorker();
+		Map message = $messageMap;
+		//System.out.println(message);
+		
+		Map payload = (Map)worker.searchMap("payload",message);
+		String jsonpayload = (String)worker.searchMap("string",payload);
+		//System.out.println("jsonpayload = "+jsonpayload);
+		Map payloadMap = worker.parseJsonData(jsonpayload.getBytes());
+		
+		//System.out.println("payloadMap = "+payloadMap);
+		String recepient = (String)worker.searchMap("recepient",payloadMap);
+		String payloadAvroschemaUrl = (String)worker.searchMap("schemaUrl",payloadMap);
+		//System.out.println("payloadAvroschemaUrl = "+payloadAvroschemaUrl);
+		byte[] decodedAvroPayloadBytes = Base64.decodeBase64((String)worker.searchMap("payload",payloadMap));
+		//deserialize avro using schema
+		Map regPayloadMap = worker.parseAvroData(decodedAvroPayloadBytes, new URL(payloadAvroschemaUrl));
+		//Map regPayloadMap = (Map)worker.searchMapFirstSubKey("RemoteRequest",message);
+		
+		//System.out.println("regPayloadMap = "+regPayloadMap);
+		String deviceId = (String)worker.searchMap("deviceId",regPayloadMap);
+		String topic = null;
+		
+		if(recepient.equals("DEVICE"))
+			topic = "device/"+deviceId+"/in";
+		else if(recepient.equals( "HUB"))
+			topic = "hub/"+deviceId+"/in";
+			
+		attrMap = new HashMap<String,Object>();
+		attrMap.put("topic", topic);
+		attrMap.put("qos", 2);
+		//System.out.println("deviceId="+deviceId+"  data = "+regPayloadMap);
+		
+		result = worker.remoteMQTTCall(mqttBrokerUri,"JavaSample", regPayloadMap,  attrMap,  true);
+		message.put("result",result);
+		//System.out.println(message);
+		//System.out.println("Message sent to MQTT returned: " + result);
+		
+		message.put("decodedpayload", regPayloadMap);
+		
+		insertLogical( new MQTTResult(message,result,mqttBrokerUri ));
+		
+		}catch(Throwable e){
+			System.out.println(e.toString());
+			//e.printStackTrace();
+			insertLogical( new ErrorMessage($messageMap,e.toString(),Arrays.toString(e.getStackTrace())));
+		}
+    		 
 end
 
 rule "Process Successful Registry results"
@@ -198,29 +252,19 @@ rule "Process Failed Registry results"
 		System.out.println("****** Process Failed Registry results ******");
 		Map message = $registryMessage.getMessage();
 		System.out.println("Message sent to registry put returned ERROR: " + message.get("result") );
-		insertLogical( new DashBoardData(message,"registry" ));
+		insertLogical( new DashBoardData(message,"fail" ));
 end	
 
-rule "Send Registry response to MQTT"
+rule "Exception Error Handler"
 	when
-			$mqttMessage : MQTTMessage( )			
+		$errorMessage : ErrorMessage()			
 	then
-		System.out.println("****** Send Registry response to MQTT ******");
-		worker = new RulesForwardWorker();
-		Map message = $mqttMessage.getMessage();
-		String mqttBrokerUri = new String("tcp://ec2-52-42-35-89.us-west-2.compute.amazonaws.com:1883");
-		Map regPayloadMap = (Map)worker.searchMapFirstSubKey("RemoteRequest",message);
-		String deviceId = (String)worker.searchMap("deviceId",message);
-		attrMap = new HashMap<String,Object>();
-		attrMap.put("topic", "device/"+deviceId+"/in");
-		attrMap.put("qos", 2);
-		System.out.println("deviceId="+deviceId+"  data = "+regPayloadMap);
-		result = worker.remoteMQTTCall(mqttBrokerUri,"JavaSample", regPayloadMap,  attrMap,  true);
-		message.put("result",result);
-		System.out.println(message);
-		System.out.println("Message sent to MQTT returned: " + result);
-		
-		insertLogical( new MQTTResult(message,result,mqttBrokerUri ));
+		System.out.println("****** Exception Error Handler ******");
+		Map message = $errorMessage.getMessage();
+		message.put("exception",$errorMessage.getException() );
+		message.put("stackTrace",$errorMessage.getStackTrace() );
+		//System.out.println(message);
+		insertLogical( new DashBoardData(message,new String("exception") ));
 end	
 
 rule "Process MQTT Error Response"
@@ -232,7 +276,7 @@ rule "Process MQTT Error Response"
 		message.put("endpoint",$mqttResult.getEndpoint());
 		message.put("result",$mqttResult);
 		System.out.println(message);
-		insertLogical( new DashBoardData(message,new String("exception") ));
+		insertLogical( new DashBoardData(message,new String("error") ));
 end	
 
 rule "Process MQTT Successful Response"
