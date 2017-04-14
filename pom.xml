@@ -8,12 +8,13 @@
 	<version>1.0.1</version>
 
 	<dependencies>
+		<!-- 
 		<dependency>
 			<groupId>internal.phoenix</groupId>
 			<artifactId>phoenix-client</artifactId>
 			<version>4.4-iotas</version>
 		</dependency>
-
+		-->
 		<dependency>
 			<groupId>org.drools</groupId>
 			<artifactId>drools-core</artifactId>
@@ -63,6 +64,12 @@
 			<artifactId>jackson-mapper-asl</artifactId>
 			<version>1.9.13</version>
 		</dependency>
+		
+		<dependency>  
+			<groupId>commons-io</groupId>
+  			<artifactId>commons-io</artifactId>
+ 			<version>2.4</version>
+  		</dependency>
 
 	</dependencies>
 
